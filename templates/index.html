@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>夢境觀測</title>
+</head>
+<body>
+    <main class="content">
+        <section id="hall" class="panel active">
+            <h2>觀測大廳</h2>
+            <p>在這裡觀察夢境的全貌，查看最新的夢境指標、事件與能量流動。</p>
+            <div class="action-grid">
+                <button class="action-button" data-target="weaving">開啟今日夢境紀錄</button>
+                <button class="action-button" data-target="subconscious">進入心靈數據室</button>
+                <button class="action-button" data-target="capsule">時空膠囊保險箱</button>
+                <button id="inspireBtn" class="action-button-secondary">隨機靈感投遞</button>
+            </div>
+            <div id="inspirationOutput" class="inspiration-box">按下「隨機靈感投遞」來獲取夢境關鍵詞組合。</div>
+        </section>
+        <section id="weaving" class="panel">
+            <h2>夢境編織室</h2>
+            <p>透過直覺與符號，編織夢境場景與意象，讓創造力自由流動。</p>
+        </section>
+        <section id="subconscious" class="panel">
+            <h2>潛意識觀測室</h2>
+            <p>深入潛意識深層，解析夢境碎片與內在訊息。</p>
+        </section>
+        <section id="capsule" class="panel">
+            <h2>時空膠囊封存室</h2>
+            <p>將重要夢境記錄存入時空膠囊，以便未來回顧與再探索。</p>
+        </section>
+    </main>
+
+    <script>
+        // 夢境靈感詞庫
+        const dreamKeywords = [
+            '月光軌跡',
+            '星辰裂縫',
+            '水晶迷宮',
+            '記憶碎片',
+            '幽夜花園',
+            '風之回廊',
+            '時間漩渦',
+            '深海心聲',
+            '銀色羽翼',
+            '幻影之門'
+        ];
+
+        const inspireBtn = document.getElementById('inspireBtn');
+        const inspirationOutput = document.getElementById('inspirationOutput');
+
+        function getRandomKeywords(count) {
+            const selected = [];
+            const pool = [...dreamKeywords];
+
+            while (selected.length < count && pool.length > 0) {
+                const index = Math.floor(Math.random() * pool.length);
+                selected.push(pool.splice(index, 1)[0]);
+            }
+
+            return selected;
+        }
+
+        inspireBtn.addEventListener('click', () => {
+            const keywords = getRandomKeywords(3);
+            inspirationOutput.textContent = `夢境靈感：${keywords.join(' / ')}`;
+        });
+    </script>
+</body>
+</html>
