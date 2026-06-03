@@ -132,7 +132,22 @@
 
     <script>
         const API_BASE = '/api';
-        let currentUser = JSON.parse(localStorage.getItem('currentUser'));
+        let currentUser = null;
+
+        async function refreshSession() {
+            try {
+                const response = await fetch(`${API_BASE}/session`, { method: 'GET' });
+                const result = await response.json();
+                currentUser = result.success ? result.user : null;
+            } catch (e) {
+                currentUser = null;
+            }
+
+            if (!currentUser) {
+                localStorage.removeItem('currentUser');
+            }
+            updateTopButton();
+        }
         
         const dreamKeywords = [
             '月光軌跡',
@@ -362,13 +377,13 @@
             if (currentUser) {
                 button.textContent = '登出';
                 button.onclick = handleLogout;
-                nameLabel.textContent = currentUser.username ? `Hello, ${currentUser.username}` : '';
+                nameLabel.textContent = currentUser.username ? `Hello, ${currentUser.username}` : '訪客模式';
             } else {
                 button.textContent = '登入';
                 button.onclick = () => {
                     window.location.hash = 'login';
                 };
-                nameLabel.textContent = '';
+                nameLabel.textContent = '訪客模式';
             }
         }
 
@@ -380,19 +395,24 @@
             });
         }
 
-        function handleLogout() {
+        async function handleLogout() {
             const confirmed = confirm('確實要登出嗎？');
-            if (confirmed) {
-                currentUser = null;
-                localStorage.removeItem('currentUser');
-                updateTopButton();
-                showPage('hall');
-                window.location.hash = '';
+            if (!confirmed) return;
+
+            try {
+                await fetch(`${API_BASE}/logout`, { method: 'POST' });
+            } catch (e) {
+                // ignore network errors; still clear client state
             }
+
+            localStorage.removeItem('currentUser');
+            currentUser = null;
+            updateTopButton();
+            window.location.href = '/';
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            updateTopButton();
+        document.addEventListener('DOMContentLoaded', async () => {
+            await refreshSession();
             routeFromHash();
             document.getElementById('loginForm').addEventListener('submit', handleLogin);
             document.getElementById('signupForm').addEventListener('submit', handleSignup);

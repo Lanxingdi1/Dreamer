@@ -191,6 +191,26 @@
               <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
             </svg>
           </div>
+          <span class="slabel-text">夢境日期</span>
+          <div class="slabel-line"></div>
+        </div>
+        <div style="margin: 0 0 18px; display:flex; justify-content:flex-start;">
+          <input
+            id="dream-date"
+            type="date"
+            value=""
+            style="width:220px;max-width:100%;padding:12px 14px;border-radius:18px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:rgba(255,255,255,.55);"
+          />
+        </div>
+
+        <!-- ============ 新增：夢境欄位標籤（引自 preview .slabel）============ -->
+        <!-- 取代原本純文字的 <label>，改為圖示 + 小大寫文字 + 漸層尾線 -->
+        <div class="slabel">
+          <div class="slabel-icon">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(155,120,255,.9)" stroke-width="2.2">
+              <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+            </svg>
+          </div>
           <span class="slabel-text">夢境內容</span>
           <div class="slabel-line"></div>
         </div>
@@ -337,7 +357,7 @@
         </div>
 
         <!-- 送出按鈕：目前僅在前端阻止預設表單行為，後續可串接 API -->
-        <div style="text-align: center; margin-top: 6px">
+        <div style="text-align: center; margin-top: 6px; display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
           <button id="submit-btn" class="submit-btn">
             <!-- 月亮圖示搭配按鈕文字 -->
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" style="position:relative;z-index:1;">
@@ -345,8 +365,17 @@
             </svg>
             <span style="position:relative;z-index:1;">解密潛意識</span>
           </button>
+          <button id="save-only-btn" class="submit-btn" style="background:rgba(255,255,255,.07); color:#fff;">
+            <!-- 记录图示  -->
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" style="position:relative;z-index:1;">
+              <path d="M6 3h12v18H6z"/>
+              <path d="M6 8h12"/>
+              <path d="M9 12h6"/>
+            </svg>
+            <span style="position:relative;z-index:1;">只記錄夢境</span>
+          </button>
           <!-- ============ 新增：送出按鈕下方功能 hint 列（引自 preview .hint-row）============ -->
-          <div class="hint-row">
+          <div class="hint-row" style="flex:1 1 100%;">
             <div class="hint-tag"><div class="hint-dot"></div>AI 夢境分析</div>
             <div class="hint-tag"><div class="hint-dot"></div>潛意識圖像生成</div>
             <div class="hint-tag"><div class="hint-dot"></div>象徵標籤解碼</div>
@@ -401,7 +430,13 @@ majorPos.forEach(([lx,ty])=>{
       const overlay = document.getElementById("intro-overlay");
       const noRealityCheckbox = document.getElementById("no-reality");
       const realityTextarea = document.getElementById("reality-content");
+      const dreamDateField = document.getElementById("dream-date");
       const submitBtn = document.getElementById("submit-btn");
+      const saveOnlyBtn = document.getElementById("save-only-btn");
+
+      if (dreamDateField && !dreamDateField.value) {
+        dreamDateField.value = new Date().toISOString().split("T")[0];
+      }
 
       // ============ 設定面板相關 DOM ============
       /* settings-toggle：新的 PNG 圖標版本（取代舊的 settings-icon SVG） */
@@ -747,6 +782,12 @@ majorPos.forEach(([lx,ty])=>{
         const reality = realityTextarea.disabled
           ? null
           : realityTextarea.value.trim();
+        const dreamDateField = document.getElementById("dream-date");
+        let dreamDate = dreamDateField ? dreamDateField.value.trim() : "";
+        if (!dreamDate) {
+          const today = new Date();
+          dreamDate = today.toISOString().split("T")[0];
+        }
 
         // 簡單的前端驗證：夢境內容不可為空
         if (!dream) {
@@ -916,7 +957,7 @@ majorPos.forEach(([lx,ty])=>{
         fetch("/api/analyze-dream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dream: dream, reality: reality }),
+          body: JSON.stringify({ dream: dream, reality: reality, dream_date: dreamDate }),
         })
           .then((response) => response.json())
           .then((data) => {
@@ -1059,6 +1100,52 @@ majorPos.forEach(([lx,ty])=>{
             console.error(err);
           });
       });
+
+      if (saveOnlyBtn) {
+        saveOnlyBtn.addEventListener("click", function (e) {
+          e.preventDefault();
+
+          const dream = document.getElementById("dream-content").value.trim();
+          const reality = realityTextarea.disabled
+            ? null
+            : realityTextarea.value.trim();
+          let dreamDate = dreamDateField ? dreamDateField.value.trim() : "";
+          if (!dreamDate) {
+            const today = new Date();
+            dreamDate = today.toISOString().split("T")[0];
+          }
+
+          if (!dream) {
+            alert("請先輸入夢境內容。");
+            return;
+          }
+
+          const resultContainer = document.getElementById("result-container");
+          resultContainer.innerHTML = `<div style="color:#b4d7ff;">正在儲存夢境，未送交 AI 分析...</div>`;
+
+          fetch("/api/save-dream-only", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ dream: dream, reality: reality, dream_date: dreamDate }),
+          })
+            .then((response) => response.json())
+            .then((data) => {
+              if (!data || !data.success) {
+                resultContainer.innerHTML = `<div style="color:#f66;">儲存失敗：${data && data.message ? data.message : "伺服器錯誤"}</div>`;
+                return;
+              }
+              resultContainer.innerHTML = `
+                <div style="max-width:520px;padding:24px;border-radius:18px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);box-shadow:0 18px 40px rgba(0,0,0,.15);color:#ebf4ff;">
+                  <h3 style="margin:0 0 10px;font-size:1rem;">夢境已儲存</h3>
+                  <p style="margin:0;line-height:1.7;color:rgba(235,244,255,.85);">已成功將夢境記錄到您的資料庫中，並保留為純文字紀錄，不送交 AI 分析或製作圖片。</p>
+                </div>
+              `;
+            })
+            .catch((err) => {
+              resultContainer.innerHTML = `<div style="color:#f66;">網路錯誤，請稍後再試。</div>`;
+            });
+        });
+      }
 
       /*
       ============ Lightbox 事件委派邏輯 ============
@@ -1297,133 +1384,11 @@ majorPos.forEach(([lx,ty])=>{
   track.appendChild(d);
 });
     </script>
-
-    <!-- 額外的滑鼠特效腳本：粒子軌跡與月亮游標 -->
-    <script>
-      // 這段腳本不會動到表單與 fetch 邏輯，只負責在背景產生微小的星光粒子與月亮游標。
-      const canvas = document.getElementById("particle-canvas");
-      const moon = document.getElementById("cursor-moon");
-      const ctx = canvas.getContext("2d");
-
-      let mouse = {
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-        moved: false,
-      };
-      let moonX = mouse.x;
-      let moonY = mouse.y;
-      const particles = [];
-
-      function resizeCanvas() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-
-      function spawnParticle(x, y) {
-        particles.push({
-          x,
-          y,
-          vx: (Math.random() - 0.5) * 0.35,
-          vy: (Math.random() - 0.5) * 0.35,
-          r: Math.random() * 1.8 + 0.6,
-          life: 1,
-          maxLife: 1,
-          alpha: Math.random() * 0.45 + 0.25,
-        });
-      }
-
-      function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // 讓月亮游標以輕微延遲跟隨滑鼠，模擬彈性流動感。
-        const ease = 0.08;
-        moonX += (mouse.x - moonX) * ease;
-        moonY += (mouse.y - moonY) * ease;
-        moon.style.left = moonX + "px";
-        moon.style.top = moonY + "px";
-
-        // 更新粒子與繪製星光點。
-        for (let i = particles.length - 1; i >= 0; i--) {
-          const p = particles[i];
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vx *= 0.96;
-          p.vy *= 0.96;
-          p.life -= 0.015;
-          p.alpha = (p.life / p.maxLife) * 0.55;
-
-          if (p.life <= 0) {
-            particles.splice(i, 1);
-            continue;
-          }
-
-          ctx.beginPath();
-          ctx.fillStyle = "rgba(255,255,255," + p.alpha + ")";
-          ctx.shadowBlur = 10;
-          ctx.shadowColor = "rgba(180, 210, 255, 0.9)";
-          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        requestAnimationFrame(animate);
-      }
-
-      window.addEventListener("mousemove", (e) => {
-        mouse.x = e.clientX;
-        mouse.y = e.clientY;
-        mouse.moved = true;
-        spawnParticle(e.clientX, e.clientY);
-      });
-
-      window.addEventListener(
-        "touchmove",
-        (e) => {
-          const t = e.touches[0];
-          if (!t) return;
-          mouse.x = t.clientX;
-          mouse.y = t.clientY;
-          spawnParticle(t.clientX, t.clientY);
-        },
-        { passive: true },
-      );
-
-      window.addEventListener("resize", resizeCanvas);
-      resizeCanvas();
-      animate();
-      
-      
-      const LANE_COUNT = 5;
-
-      function spawnMeteor(laneIndex) {
-        const ML = document.getElementById('meteor-layer'); // ← 移到函數內
-        if (!ML) return; // 找不到就安全跳過
-        const vh = window.innerHeight, vw = window.innerWidth;
-        const laneH  = vh / LANE_COUNT;
-        const startY = laneIndex * laneH + laneH * (.1 + Math.random() * .8);
-        const length = 160 + Math.random() * 120;
-        const startX = vw + length * .3 + Math.random() * 60;
-        const angle  = -(14 + Math.random() * 12);
-        const dur = 2.6 + Math.random() * 0.2; // 飛行時間
-        const travel = `${-(vw + length * 1.6)}px`;
-        const m = document.createElement('div');
-        m.className = 'meteor';
-        m.style.cssText = `left:${startX}px;top:${startY}px;width:${length}px;--ang:${angle}deg;--travel:${travel};--dur:${dur}s;`;
-        ML.appendChild(m);
-        setTimeout(() => m.remove(), (dur + .5) * 1000);
-      }
-
-      function scheduleLane(i) {
-        setTimeout(() => { spawnMeteor(i); scheduleLane(i); }, 2000 + Math.random() * 7000);
-      }
-
-      for (let i = 0; i < LANE_COUNT; i++) {
-        setTimeout(() => { spawnMeteor(i); scheduleLane(i); }, i * 600 + Math.random() * 800);
-      }
-    </script>
     <div id="image-lightbox" class="image-lightbox">
       <img id="lightbox-image" src="" alt="放大夢境記憶照片" />
     </div>
     <div id="aurora-layer" style="position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;"></div>
     <div id="meteor-layer" style="position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;"></div>
+    <script src="{{ url_for('static', filename='shared-dream-effects.js') }}"></script>
   </body>
 </html>

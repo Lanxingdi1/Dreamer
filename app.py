@@ -2,7 +2,9 @@ import os
 import random
 import smtplib
 import ssl
+import sqlite3
 from email.mime.text import MIMEText
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from flask import Flask, jsonify, render_template, request, session
 from flask_cors import CORS
@@ -10,22 +12,67 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.secret_key = 'dream_secret_key_look_at_here' #新增的行數喔
-# 為了方便你直接測試，我幫你加了一個預設的測試帳號
-# 格式為 { "信箱": { "username": "用戶名", "password": "密碼" } }
-users = {
-    'test@gmail.com': {
-        'username': '夢境觀測員',
-        'password': 'password123'
-    }
-}
 verification_codes = {}
-#廖子峰
+
+# 資料庫檔案路徑（放在專案根目錄，檔名為 account.db）
+DB_PATH = os.path.join(os.path.dirname(__file__), 'account.db')
+UPLOADS_FOLDER = os.path.join(os.path.dirname(__file__), 'static', 'uploads')
+os.makedirs(UPLOADS_FOLDER, exist_ok=True)
+
+# 廖子峰
 # =======================================================
 # 🔒 在這裡直接填入你的 GMAIL 帳號與 16 位應用程式密碼
 # =======================================================
 EMAIL_ADDRESS = '' 
 EMAIL_APP_PASSWORD = '' # ⚠️ 注意：不能填一般密碼，要填 Google 申請的應用程式密碼
 # =======================================================
+
+
+def init_account_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('PRAGMA foreign_keys = ON;')
+
+    # 使用者帳號表
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    )
+    ''')
+
+    # 夢境資料表，與使用者 ID 關聯
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS dreams (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER,
+        dream_content TEXT NOT NULL,
+        reality_content TEXT,
+        emotion_tag TEXT,
+        ai_analysis TEXT,
+        image_path TEXT,
+        dream_date TEXT NOT NULL DEFAULT (date('now','localtime')),
+        timestamp TEXT DEFAULT (datetime('now','localtime')),
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+    ''')
+
+    # 預設測試帳號（如果尚未存在）
+    cursor.execute('SELECT id FROM users WHERE email = ?', ('test@gmail.com',))
+    if cursor.fetchone() is None:
+        cursor.execute(
+            'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+            ('夢境觀測員', 'test@gmail.com', generate_password_hash('password123'))
+        )
+
+    conn.commit()
+    conn.close()
+
+
+init_account_db()
 
 @app.route('/')
 def index():
@@ -40,17 +87,21 @@ def api_login():
     if not email or not password:
         return jsonify(success=False, message='Email and password are required'), 400
 
-    user = users.get(email)
-    if not user or user['password'] != password:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, username, password_hash FROM users WHERE email = ?', (email,))
+    user_row = cursor.fetchone()
+    conn.close()
+
+    if not user_row or not check_password_hash(user_row['password_hash'], password):
         return jsonify(success=False, message='Invalid email or password'), 401
 
-    # ─── 幫同學新增這兩行，把登入狀態寫進後端 session ───
-    # 這樣你的夢境分析路由才能成功抓到是哪一個 user_id 在存東西
-    session['user'] = user['username']
-    session['user_id'] = email # 目前同學沒有用數字 ID，先用 email 當作唯一識別碼
-    # ─────────────────────────────────────────────────────
+    session['user'] = user_row['username']
+    session['user_id'] = user_row['id']
+    session['user_email'] = email
 
-    return jsonify(success=True, message='Login successful', user={'username': user['username'], 'email': email})
+    return jsonify(success=True, message='Login successful', user={'username': user_row['username'], 'email': email})
 
 @app.route('/api/signup', methods=['POST'])
 def api_signup():
@@ -64,13 +115,21 @@ def api_signup():
         return jsonify(success=False, message='All fields are required'), 400
     if password != confirm_password:
         return jsonify(success=False, message='Passwords do not match'), 400
-    if email in users:
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+    if cursor.fetchone() is not None:
+        conn.close()
         return jsonify(success=False, message='Email already registered'), 409
 
-    users[email] = {
-        'username': username,
-        'password': password,
-    }
+    cursor.execute(
+        'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+        (username, email, generate_password_hash(password))
+    )
+    conn.commit()
+    conn.close()
+
     return jsonify(success=True, message='Account created successfully')
 
 @app.route('/api/forgot-password', methods=['POST'])
@@ -80,9 +139,15 @@ def api_forgot_password():
 
     if not email:
         return jsonify(success=False, message='Email is required'), 400
-    if email not in users:
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+    if cursor.fetchone() is None:
+        conn.close()
         return jsonify(success=False, message='No account found for that email'), 404
-        
+    conn.close()
+
     # 防止你忘記改範例帳密的安全檢查
     if EMAIL_ADDRESS == '你的帳號@gmail.com' or not EMAIL_APP_PASSWORD:
         return jsonify(success=False, message='Email service not configured. Please check app.py line 24.'), 500
@@ -120,18 +185,39 @@ def api_reset_password():
 
     if not email or not code or not password:
         return jsonify(success=False, message='Email, code, and new password are required'), 400
-    if email not in users:
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+    if cursor.fetchone() is None:
+        conn.close()
         return jsonify(success=False, message='No account found for that email'), 404
+
     expected_code = verification_codes.get(email)
     if expected_code != code:
+        conn.close()
         return jsonify(success=False, message='Invalid verification code'), 400
 
-    users[email]['password'] = password
+    cursor.execute(
+        'UPDATE users SET password_hash = ? WHERE email = ?',
+        (generate_password_hash(password), email)
+    )
+    conn.commit()
+    conn.close()
     verification_codes.pop(email, None)
     return jsonify(success=True, message='Password reset successfully')
 
-if __name__ == '__main__':
-    app.run(debug=True)
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    session.clear()
+    return jsonify(success=True, message='已登出，您現在為訪客。')
+
+@app.route('/api/session', methods=['GET'])
+def api_session():
+    user = session.get('user')
+    if user and session.get('user_id'):
+        return jsonify(success=True, user={'username': user, 'email': session.get('user_email')})
+    return jsonify(success=True, user=None)
 
 
 # ------------------ Dream Weaver Room 後端擴充 ------------------
@@ -148,7 +234,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # 使用指定的模型與從 config 取得的金鑰來初始化 LLM
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash", 
+    model="gemini-2.5-flash-lite", 
     google_api_key=config["Gemini"]["API_KEY"]
 )
 
@@ -202,14 +288,19 @@ def data():
     user_id = session.get('user_id')
     username = session.get('user')
     if not user_id:
-        return render_template('data.html', user=None, dreams=[], message='請先登入後再進入心靈數據室。')
+        return render_template(
+            'data.html',
+            user=None,
+            dreams=[],
+            message='您目前為訪客，請登入後再使用此功能。'
+        )
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        'SELECT id, dream_content, reality_content, emotion_tag, ai_analysis, image_path, timestamp FROM dreams WHERE CAST(user_id AS TEXT) = ? ORDER BY timestamp DESC',
-        (str(user_id),)
+        'SELECT id, dream_content, reality_content, emotion_tag, ai_analysis, image_path, dream_date, timestamp FROM dreams WHERE user_id = ? ORDER BY COALESCE(dream_date, substr(timestamp,1,10)) DESC, timestamp DESC',
+        (user_id,)
     )
     rows = cursor.fetchall()
     conn.close()
@@ -221,54 +312,8 @@ def data():
 
 
 # ------------------ Dreams 資料表與儲存輔助函式（新增） ------------------
-# 以下程式碼會在應用啟動時建立一個本地 Lite`SQ` 資料庫檔案，並建立 `dreams` 資料表（若尚未存在）
-import sqlite3
+# 使用 account.db 作為單一 SQLite 資料庫，包含 users 與 dreams 表
 from datetime import datetime
-
-# 資料庫檔案路徑（放在專案根目錄，檔名為 dreams.db）
-DB_PATH = os.path.join(os.path.dirname(__file__), 'dreams.db')
-UPLOADS_FOLDER = os.path.join(os.path.dirname(__file__), 'static', 'uploads')
-os.makedirs(UPLOADS_FOLDER, exist_ok=True)
-
-
-def init_dreams_table():
-    # 建立或開啟 SQLite 連線（若檔案不存在會自動建立）
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # 啟用 foreign key 支援（SQLite 預設關閉，需要明確開啟）
-    cursor.execute('PRAGMA foreign_keys = ON;')
-
-    # 建立 `dreams` 資料表，若已存在則不會覆寫
-    # 欄位說明：
-    # - id: 主鍵整數（自動遞增）
-    # - user_id: 整數，用來關聯到使用者（若您有資料庫中的 users 表，可視為外鍵）
-    # - dream_content: 夢境文字內容（不可為 NULL）
-    # - reality_content: 與現實事件的關聯說明（可為 NULL）
-    # - emotion_tag: 情緒標籤（字串）
-    # - ai_analysis: AI 分析結果文字
-    # - timestamp: 儲存時間（預設使用本機時間的 YYYY-MM-DD HH:MM:SS）
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS dreams (
-        id INTEGER PRIMARY KEY,
-        user_id INTEGER,
-        dream_content TEXT NOT NULL,
-        reality_content TEXT,
-        emotion_tag TEXT,
-        ai_analysis TEXT,
-        image_path TEXT,
-        timestamp TEXT DEFAULT (datetime('now','localtime')),
-        FOREIGN KEY(user_id) REFERENCES users(id)
-    )
-    ''')
-
-    # 提交並關閉連線
-    conn.commit()
-    conn.close()
-
-
-# 在模組載入時初始化資料表，確保應用啟動後可直接使用
-init_dreams_table()
 
 
 def ensure_dreams_table_schema():
@@ -278,13 +323,15 @@ def ensure_dreams_table_schema():
     columns = [row[1] for row in cursor.fetchall()]
     if 'image_path' not in columns:
         cursor.execute('ALTER TABLE dreams ADD COLUMN image_path TEXT')
+    if 'dream_date' not in columns:
+        cursor.execute('ALTER TABLE dreams ADD COLUMN dream_date TEXT')
     conn.commit()
     conn.close()
 
 ensure_dreams_table_schema()
 
 
-def save_dream_to_db(user_id, dream, reality=None, emotion=None, analysis=None, image_path=None):
+def save_dream_to_db(user_id, dream, reality=None, emotion=None, analysis=None, image_path=None, dream_date=None):
     """
     將夢境資料寫入 `dreams` 資料表的輔助函式。
 
@@ -294,6 +341,7 @@ def save_dream_to_db(user_id, dream, reality=None, emotion=None, analysis=None, 
     - reality: 與現實相關的說明（字串或 None）
     - emotion: 情緒標籤（字串或 None）
     - analysis: AI 分析結果（字串或 None）
+    - dream_date: 使用者選擇的夢境日期（YYYY-MM-DD）
 
     回傳值：
     - True: 成功寫入資料庫
@@ -320,13 +368,16 @@ def save_dream_to_db(user_id, dream, reality=None, emotion=None, analysis=None, 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    if not dream_date:
+        dream_date = datetime.now().strftime('%Y-%m-%d')
+
     # 使用參數化查詢避免 SQL injection
     cursor.execute(
         '''
-        INSERT INTO dreams (user_id, dream_content, reality_content, emotion_tag, ai_analysis, image_path)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO dreams (user_id, dream_content, reality_content, emotion_tag, ai_analysis, image_path, dream_date)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ''',
-        (user_id, dream, reality, emotion, analysis, image_path)
+        (user_id, dream, reality, emotion, analysis, image_path, dream_date)
     )
 
     conn.commit()
@@ -341,6 +392,38 @@ def save_dream_to_db(user_id, dream, reality=None, emotion=None, analysis=None, 
 import json
 
 
+@app.route('/api/save-dream-only', methods=['POST'])
+def save_dream_only():
+    data = request.get_json() or {}
+    dream = (data.get('dream') or '').strip()
+    reality = data.get('reality')
+    if isinstance(reality, str):
+        reality = reality.strip() or None
+    dream_date = (data.get('dream_date') or '').strip() or None
+
+    if not dream:
+        return jsonify(success=False, message='夢境內容為空'), 400
+
+    session_user_id = session.get('user_id')
+    if not session_user_id:
+        return jsonify(success=False, message='請先登入後再使用此功能'), 401
+
+    try:
+        save_dream_to_db(
+            session_user_id,
+            dream,
+            reality,
+            None,
+            None,
+            None,
+            dream_date,
+        )
+    except Exception as err:
+        return jsonify(success=False, message=f'儲存失敗：{err}'), 500
+
+    return jsonify(success=True, message='夢境已儲存，不進行 AI 分析')
+
+
 @app.route('/api/analyze-dream', methods=['POST'])
 def analyze_dream():
     # 此路由負責：
@@ -350,11 +433,12 @@ def analyze_dream():
     # 4) 若使用者已登入（session 內有 user_id），則呼叫 save_dream_to_db 儲存紀錄
 
     data = request.get_json() or {}
-    # 取得前端送來的夢境內容（必填）與現實情況（可為 None）
+    # 取得前端送來的夢境內容（必填）、現實情況（可為 None）、以及日期選擇
     dream = (data.get('dream') or '').strip()
     reality = data.get('reality')
     if isinstance(reality, str):
         reality = reality.strip() or None
+    dream_date = (data.get('dream_date') or '').strip() or None
 
     # 若夢境內容為空，回傳錯誤
     if not dream:
@@ -459,11 +543,19 @@ def analyze_dream():
     # 2. 呼叫第一步做好的影像生成函式
     image_url = generate_dream_image(image_prompt) if image_prompt else ""
 
-    # 3. 若使用者已登入，將生成圖片路徑一併存儲到資料庫
+    # 3. 若使用者已登入，將生成圖片路徑以及選擇日期一併存儲到資料庫
     try:
         session_user_id = session.get('user_id')
         if session_user_id:
-            save_dream_to_db(session_user_id, dream, reality, emotion_tag, ai_analysis, image_url or None)
+            save_dream_to_db(
+                session_user_id,
+                dream,
+                reality,
+                emotion_tag,
+                ai_analysis,
+                image_url or None,
+                dream_date
+            )
     except Exception:
         pass  # 資料庫儲存失敗時安全的 pass，不影響網頁回傳
 
@@ -474,4 +566,7 @@ def analyze_dream():
         'image_url': image_url,
         'symbol_tags': symbol_tags 
     })
+
+if __name__ == '__main__':
+    app.run(debug=True)
 # ------------------ 分析路由新增結束 ------------------
