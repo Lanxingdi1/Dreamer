@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>心靈數據室</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="content">
+        <section class="panel active">
+            <h2>心靈數據室</h2>
+            {% if user %}
+                <p>歡迎回來，<strong>{{ user }}</strong>。以下是您過去記錄的夢境：</p>
+                {% if dreams %}
+                    <div class="dream-list">
+                        {% for dream in dreams %}
+                            <article class="dream-card" style="margin-bottom: 22px; padding: 18px; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; background: rgba(255,255,255,.04); backdrop-filter: blur(6px);">
+                                <h3 style="margin-bottom: 10px;">夢境 {{ loop.index }} <span class="dream-time" style="font-size: 0.92rem; color: rgba(255,255,255,.65);">{{ dream.timestamp }}</span></h3>
+                                {% if dream.image_path %}
+                                    <div style="margin-bottom: 14px; text-align:center;">
+                                        <img
+                                            src="{% if dream.image_path.startswith('http') or dream.image_path.startswith('/') %}{{ dream.image_path }}{% else %}{{ url_for('static', filename=dream.image_path) }}{% endif %}"
+                                            alt="夢境圖片 {{ loop.index }}"
+                                            style="max-width:100%;height:auto;border-radius:14px;box-shadow:0 18px 40px rgba(0,0,0,.15);"
+                                        >
+                                    </div>
+                                {% endif %}
+                                <p><strong>夢境內容：</strong> {{ dream.dream_content }}</p>
+                                {% if dream.reality_content %}
+                                    <p><strong>現實關聯：</strong> {{ dream.reality_content }}</p>
+                                {% endif %}
+                                {% if dream.emotion_tag %}
+                                    <p><strong>情緒標籤：</strong> {{ dream.emotion_tag }}</p>
+                                {% endif %}
+                                {% if dream.ai_analysis %}
+                                    <p><strong>AI 分析：</strong> {{ dream.ai_analysis }}</p>
+                                {% endif %}
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p>目前尚未找到任何夢境紀錄。請先回到大廳並記錄新的夢境。</p>
+                {% endif %}
+            {% else %}
+                <p>{{ message or '您尚未登入，無法檢視夢境資料。' }}</p>
+            {% endif %}
+            <div class="action-grid" style="margin-top: 24px;">
+                <a href="/" class="action-button" style="text-decoration: none; display: inline-block; text-align: center;">返回觀測大廳</a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>
