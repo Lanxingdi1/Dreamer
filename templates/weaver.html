@@ -117,7 +117,7 @@
         <!-- 背景音樂開關：開啟/關閉潛意識環境音 -->
         <div class="settings-option">
           <div class="toggle-switch">
-            <input type="checkbox" id="toggle-music" title="切換背景環境音" />
+            <input type="checkbox" id="toggle-music" title="切換背景環境音" checked />
             <div class="switch-slider"></div>
           </div>
           <label for="toggle-music">開啟潛意識環境音</label>
@@ -471,10 +471,15 @@ majorPos.forEach(([lx,ty])=>{
         )
           return;
 
-        // 先加入「薄霧散開」動畫類別，讓字體出現擴散、模糊與透明化效果
+        // 加入「薄霧散開」動畫類別，讓字體出現擴散、模糊與透明化效果
         overlay.classList.add("dissolving");
         // 將遮罩設為不可再點擊，避免重複觸發
         overlay.setAttribute("aria-hidden", "true");
+
+        // ★ 新增：使用者第一次互動，瀏覽器允許播放音訊 → 若預設開啟，啟動背景音樂
+        if (toggleMusicCheckbox && toggleMusicCheckbox.checked) {
+          startBgMusic();
+        }
 
         // 在動畫完成後，再將整個遮罩隱藏，避免仍然佔用畫面
         setTimeout(function () {
@@ -553,38 +558,44 @@ majorPos.forEach(([lx,ty])=>{
       - 支援音量漸變效果
     */
 
+// ============ 共用：背景音樂淡入 / 淡出 ============
+      function startBgMusic() {
+        bgMusic.volume = 0;
+        bgMusic.play().catch(function (err) {
+          console.warn("背景音訊播放失敗：", err);
+        });
+
+        let vol = 0;
+        const volumeInterval = setInterval(function () {
+          vol += 0.05;
+          if (vol >= 0.3) {
+            bgMusic.volume = 0.3;
+            clearInterval(volumeInterval);
+          } else {
+            bgMusic.volume = vol;
+          }
+        }, 100);
+      }
+
+      function stopBgMusic() {
+        let vol = bgMusic.volume;
+        const volumeInterval = setInterval(function () {
+          vol -= 0.05;
+          if (vol <= 0) {
+            bgMusic.volume = 0;
+            bgMusic.pause();
+            clearInterval(volumeInterval);
+          } else {
+            bgMusic.volume = vol;
+          }
+        }, 100);
+      }
+
       toggleMusicCheckbox.addEventListener("change", function () {
         if (toggleMusicCheckbox.checked) {
-          // 設定音量為 0，然後播放
-          bgMusic.volume = 0;
-          bgMusic.play().catch(function (err) {
-            console.warn("背景音訊播放失敗：", err);
-          });
-
-          // 平滑增加音量（0 -> 0.3）
-          let vol = 0;
-          const volumeInterval = setInterval(function () {
-            vol += 0.05;
-            if (vol >= 0.3) {
-              bgMusic.volume = 0.3;
-              clearInterval(volumeInterval);
-            } else {
-              bgMusic.volume = vol;
-            }
-          }, 100);
+          startBgMusic();
         } else {
-          // 平滑降低音量（0.3 -> 0），然後暫停
-          let vol = bgMusic.volume;
-          const volumeInterval = setInterval(function () {
-            vol -= 0.05;
-            if (vol <= 0) {
-              bgMusic.volume = 0;
-              bgMusic.pause();
-              clearInterval(volumeInterval);
-            } else {
-              bgMusic.volume = vol;
-            }
-          }, 100);
+          stopBgMusic();
         }
       });
 
@@ -1012,6 +1023,18 @@ majorPos.forEach(([lx,ty])=>{
               }
             } else {
               emotion = res.emotion_tag || emotion;
+
+              // 新增：把 emotion_details 也存起來供遊戲推薦使用
+              if (res.emotion_details) {
+                  try {
+                      if (typeof res.emotion_details === 'string') {
+                          res.emotion_details = JSON.parse(res.emotion_details);
+                      }
+                  } catch(e) {
+                      res.emotion_details = null;
+                  }
+              }
+
               symbolTags = Array.isArray(res.symbol_tags)
                 ? res.symbol_tags
                 : [];
@@ -1081,6 +1104,17 @@ majorPos.forEach(([lx,ty])=>{
                 <button id="download-btn" style="padding: 8px 18px; font-size: 14px; border: 1px solid rgba(255,255,255,0.2); border-radius: 999px; background: rgba(255,255,255,0.1); color: white; cursor: pointer; backdrop-filter: blur(5px); transition: all 0.3s ease;">💾 封存夢境記憶</button>
                 <button id="ig-story-btn" style="padding: 8px 18px; font-size: 14px; border: 1px solid rgba(220,175,60,0.4); border-radius: 999px; background: rgba(220,175,60,0.12); color: rgba(255,230,140,0.95); cursor: pointer; backdrop-filter: blur(5px); transition: all 0.3s ease;">📲 下載 IG Story</button>
             </div>
+            <div id="game-recommend-btn" style="text-align:center; margin-top: 12px; display:none;">
+              <a id="game-link" href="#" target="_blank"
+                  style="display:inline-flex; align-items:center; gap:8px; padding:10px 24px;
+                        font-size:14px; border-radius:999px; text-decoration:none; color:#fff;
+                        background:linear-gradient(135deg,rgba(155,120,255,0.6),rgba(123,220,255,0.5));
+                        border:1px solid rgba(155,120,255,0.4);
+                        box-shadow:0 0 14px rgba(155,120,255,0.25);
+                        transition:all 0.3s ease;">
+                  🎮 <span id="game-btn-text">根據你的情緒玩個遊戲</span>
+              </a>
+          </div>
           `;
 
             // 設定漸層背景與必要的樣式（JS 直接設定 style 以利動態顏色）
@@ -1093,6 +1127,85 @@ majorPos.forEach(([lx,ty])=>{
 
             // 若需要，將結果卡片滾到可視範圍
             card.scrollIntoView({ behavior: "smooth" });
+            // ===== 根據情緒推薦遊戲 =====
+            const gameBtn = document.getElementById('game-recommend-btn');
+            const gameLink = document.getElementById('game-link');
+            const gameBtnText = document.getElementById('game-btn-text');
+
+            // 情緒關鍵字對應表
+            const emotionGameMap = [
+                {
+                    keywords: ['生氣','暴怒','煩躁','怨氣','不甘心','被背叛','吃醋','憤怒'],
+                    category: 'angry',
+                    url: '/games/angry',
+                    text: '😤 去批改考卷發洩一下'
+                },
+                {
+                    keywords: ['難過','悲傷','心碎','沮喪','委屈','悵然','依依不捨','遺憾','自責','無助'],
+                    category: 'sad',
+                    url: '/static/games/popfat/index.html',
+                    text: '😿 去狂點貓咪轉移注意力'
+                },
+                {
+                    keywords: ['開心','欣喜','滿足','愜意','成就感','刺激','期待','被肯定','歸屬感','喜悅','快樂'],
+                    category: 'happy',
+                    url: '/games/electric',
+                    text: '⚡ 心情好就來挑戰電流急急棒'
+                },
+                {
+                    keywords: ['焦慮','恐懼','忐忑','驚恐','不安','惶恐','社交焦慮','怕被拋棄','緊張'],
+                    category: 'anxious',
+                    url: '/static/games/minesweeper/index.html',
+                    text: '💣 專注排雷轉移焦慮'
+                },
+                {
+                    keywords: ['平靜','放鬆','釋然','寧靜','心動','患得患失','五味雜陳','愛恨交織','哭笑不得'],
+                    category: 'calm',
+                    url: '/games/tetris',
+                    text: '🧩 靜下來疊疊方塊吧'
+                }
+            ];
+
+            // 把情緒詞對應到 category 的輔助函式
+            function getCategory(keyword) {
+                for (const entry of emotionGameMap) {
+                    if (entry.keywords.some(k => keyword.includes(k) || k.includes(keyword))) {
+                        return entry.category;
+                    }
+                }
+                return null;
+            }
+
+            let finalCategory = null;
+
+            // 第一優先：用 emotion_details 比例最高的那個情緒決定
+            const emotionDetails = res.emotion_details;
+            if (emotionDetails && typeof emotionDetails === 'object') {
+                let maxWeight = -1;
+                let maxEmotion = '';
+                for (const [emo, weight] of Object.entries(emotionDetails)) {
+                    if (weight > maxWeight) {
+                        maxWeight = weight;
+                        maxEmotion = emo;
+                    }
+                }
+                if (maxEmotion) {
+                    finalCategory = getCategory(maxEmotion);
+                }
+            }
+
+            // 第二優先：emotion_details 比對不到時，用 emotion_tag 關鍵字比對
+            if (!finalCategory) {
+                finalCategory = getCategory(emotion);
+            }
+
+            // 找到對應的遊戲設定
+            const gameEntry = emotionGameMap.find(e => e.category === finalCategory)
+                || emotionGameMap.find(e => e.category === 'sad'); // 最終預設
+
+            gameLink.href = gameEntry.url;
+            gameBtnText.textContent = gameEntry.text;
+            gameBtn.style.display = 'block';
           })
           .catch((err) => {
             resultContainer.innerHTML =
